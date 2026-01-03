@@ -32,7 +32,7 @@ export default function InviteUser() {
     }
   };
 
-const createInviteMutation = useMutation({
+  const createInviteMutation = useMutation({
     mutationFn: async (inviteEmail) => {
       const invitation = await base44.entities.Invitation.create({
         email: inviteEmail,
