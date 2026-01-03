@@ -11,6 +11,8 @@ import AdminDashboard from './pages/AdminDashboard';
 import Scanner from './pages/Scanner';
 import Transaction from './pages/Transaction';
 import AddProduct from './pages/AddProduct';
+import ActivityLog from './pages/ActivityLog';
+import AllActivity from './pages/AllActivity';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -35,7 +37,9 @@ function App() {
           <Route path="/scanner" element={<Scanner />} />
           <Route path="/transaction" element={<Transaction />} />
           <Route path="/add-product" element={<AddProduct />} />
+          <Route path="/activity-log" element={<ActivityLog />} />
           <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/admin/activity" element={<AllActivity />} />
           <Route path="/" element={<Navigate to="/login" replace />} />
           <Route path="*" element={<Navigate to="/login" replace />} />
         </Routes>
