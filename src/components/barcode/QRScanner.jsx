@@ -31,19 +31,28 @@ export default function QRScanner({ onScan, onError }) {
 
   const initializeScanner = async () => {
     try {
+      // Check if jsQR is already loaded
+      if (window.jsQR) {
+        console.log('jsQR already loaded');
+        startCamera();
+        return;
+      }
+
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+      script.async = true;
       script.onload = () => {
         console.log('jsQR loaded successfully');
-        startCamera();
+        setTimeout(() => startCamera(), 100);
       };
       script.onerror = () => {
-        console.error('Failed to load jsQR');
-        setError('Failed to load scanner library');
+        console.error('Failed to load jsQR from CDN');
+        setError('Failed to load scanner library. Check internet connection.');
         setStatus('error');
       };
       document.head.appendChild(script);
     } catch (err) {
+      console.error('Init error:', err);
       setError(err.message);
       setStatus('error');
     }
@@ -51,6 +60,7 @@ export default function QRScanner({ onScan, onError }) {
 
   const startCamera = async () => {
     try {
+      console.log('Requesting camera access...');
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
@@ -60,9 +70,11 @@ export default function QRScanner({ onScan, onError }) {
         audio: false
       });
 
+      console.log('Camera stream obtained');
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         videoRef.current.onloadedmetadata = () => {
+          console.log('Video metadata loaded, starting playback');
           videoRef.current.play();
           setStatus('scanning');
           scanFrame();
