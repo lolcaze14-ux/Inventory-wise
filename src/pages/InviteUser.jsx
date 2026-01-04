@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 
 export default function InviteUser() {
   const [user, setUser] = useState(null);
+  const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState('');
   const [inviteLink, setInviteLink] = useState('');
   const [copied, setCopied] = useState(false);
@@ -21,14 +22,31 @@ export default function InviteUser() {
 
   const loadUser = async () => {
     try {
-      const userData = await base44.auth.me();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        window.location.href = createPageUrl('Login');
+        return;
+      }
+
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error) throw error;
+
       setUser(userData);
       
       if (userData.role !== 'admin') {
         window.location.href = createPageUrl('Dashboard');
       }
     } catch (error) {
+      console.error('Error loading user:', error);
       window.location.href = createPageUrl('Login');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -55,6 +73,14 @@ export default function InviteUser() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 flex items-center justify-center">
+        <p className="text-xl text-gray-600">Loading...</p>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 to-pink-100 p-4">
