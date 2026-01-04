@@ -1,192 +1,196 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { Camera, CheckCircle, XCircle } from 'lucide-react';
+import React, { useState } from 'react';
+import { Camera, CheckCircle, XCircle, Keyboard } from 'lucide-react';
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 
 export default function QRScanner({ onScan, onError }) {
-  const videoRef = useRef(null);
-  const canvasRef = useRef(null);
-  const [status, setStatus] = useState('initializing');
-  const [stream, setStream] = useState(null);
-  const [jsQRReady, setJsQRReady] = useState(false);
-  const scanIntervalRef = useRef(null);
+  const [mode, setMode] = useState('camera'); // 'camera' or 'manual'
+  const [manualInput, setManualInput] = useState('');
+  const [cameraActive, setCameraActive] = useState(false);
+  const [cameraError, setCameraError] = useState(null);
 
-  // Load jsQR library
-  useEffect(() => {
-    const script = document.createElement('script');
-    script.src = 'https://unpkg.com/jsqr@1.4.0/dist/jsQR.js';
-    script.crossOrigin = 'anonymous';
-    script.onload = () => {
-      setJsQRReady(true);
-    };
-    script.onerror = () => {
-      console.error('Failed to load jsQR library');
-      setStatus('error');
-      if (onError) onError(new Error('Failed to load QR scanner library'));
-    };
-    document.head.appendChild(script);
-
-    return () => {
-      if (document.head.contains(script)) {
-        document.head.removeChild(script);
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    if (jsQRReady) {
-      startCamera();
+  React.useEffect(() => {
+    if (mode === 'camera') {
+      loadCamera();
     }
     return () => {
-      stopCamera();
+      // Cleanup
     };
-  }, [jsQRReady]);
+  }, [mode]);
 
-  const startCamera = async () => {
+  const loadCamera = async () => {
     try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { 
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        }
+      setCameraError(null);
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'environment' }
       });
+
+      // Load html5-qrcode
+      const script = document.createElement('script');
+      script.src = 'https://unpkg.com/html5-qrcode@2.2.4/dist/html5-qrcode.min.js';
       
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
-        setStream(mediaStream);
-        setStatus('ready');
-        
-        // Start scanning after video is loaded
-        videoRef.current.onloadedmetadata = () => {
-          scanIntervalRef.current = setInterval(scanQRCode, 300);
-        };
-      }
+      script.onload = () => {
+        setTimeout(() => {
+          try {
+            const Html5Qrcode = window.Html5Qrcode;
+            
+            if (!document.getElementById('qr-reader')) {
+              setCameraError('Scanner element not found');
+              return;
+            }
+
+            const html5QrCode = new Html5Qrcode('qr-reader', {
+              formatsToSupport: ['QR_CODE'],
+              verbose: false,
+              experimentalFeatures: {
+                useBarcoderWorker: true,
+              },
+              fps: 10,
+              qrbox: { width: 250, height: 250 }
+            });
+
+            html5QrCode.start(
+              { facingMode: 'environment' },
+              { fps: 10, qrbox: 250 },
+              (decodedText) => {
+                console.log('QR detected:', decodedText);
+                html5QrCode.stop();
+                setCameraActive(false);
+                if (onScan) onScan(decodedText);
+              },
+              (error) => {
+                // Ignore scanning errors, keep trying
+              }
+            ).then(() => {
+              setCameraActive(true);
+            }).catch((err) => {
+              console.error('Camera start error:', err);
+              setCameraError('Could not start camera: ' + err.message);
+            });
+          } catch (err) {
+            console.error('Scanner init error:', err);
+            setCameraError('Scanner initialization failed');
+          }
+        }, 100);
+      };
+
+      script.onerror = () => {
+        setCameraError('Failed to load scanner library');
+      };
+
+      document.head.appendChild(script);
     } catch (err) {
       console.error('Camera error:', err);
-      setStatus('error');
-      if (onError) onError(err);
+      setCameraError(err.message);
+      setCameraActive(false);
     }
   };
 
-  const stopCamera = () => {
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-    if (scanIntervalRef.current) {
-      clearInterval(scanIntervalRef.current);
+  const handleManualSubmit = () => {
+    if (manualInput.trim()) {
+      if (onScan) onScan(manualInput.trim());
     }
   };
 
-  const scanQRCode = () => {
-    if (!videoRef.current || !canvasRef.current || status !== 'ready') return;
+  if (mode === 'manual') {
+    return (
+      <div className="fixed inset-0 bg-black flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md space-y-6">
+          <div className="text-center space-y-2">
+            <Keyboard className="w-16 h-16 text-white mx-auto" />
+            <h2 className="text-3xl font-bold text-white">Manual Entry</h2>
+            <p className="text-lg text-white/70">Enter barcode code manually</p>
+          </div>
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const context = canvas.getContext('2d');
+          <div className="space-y-4">
+            <Input
+              type="text"
+              placeholder="Enter barcode or QR data"
+              value={manualInput}
+              onChange={(e) => setManualInput(e.target.value)}
+              onKeyPress={(e) => e.key === 'Enter' && handleManualSubmit()}
+              className="h-14 text-lg bg-white"
+              autoFocus
+            />
 
-    try {
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        context.drawImage(video, 0, 0, canvas.width, canvas.height);
+            <Button
+              onClick={handleManualSubmit}
+              disabled={!manualInput.trim()}
+              className="w-full h-14 text-lg font-bold bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Submit Barcode
+            </Button>
 
-        const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
-        
-        // Use jsQR library to scan
-        if (window.jsQR) {
-          const code = window.jsQR(imageData.data, imageData.width, imageData.height);
-          
-          if (code && code.data) {
-            console.log('QR Code detected:', code.data);
-            setStatus('detected');
-            stopCamera();
-            if (onScan) {
-              setTimeout(() => onScan(code.data), 500);
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.error('Scan error:', err);
-    }
-  };
+            <Button
+              onClick={() => {
+                setMode('camera');
+                setManualInput('');
+              }}
+              variant="outline"
+              className="w-full h-14 text-lg font-bold text-white border-white hover:bg-white/10"
+            >
+              Try Camera Again
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className="relative w-full h-full bg-black">
-      {status === 'ready' && (
-        <>
-          <video
-            ref={videoRef}
-            autoPlay
-            playsInline
-            muted
-            className="w-full h-full object-cover"
-          />
-          <canvas ref={canvasRef} className="hidden" />
-        </>
-      )}
-      
-      {/* Scanning overlay */}
-      <div className="absolute inset-0 pointer-events-none">
-        {status === 'ready' && (
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-72 h-72 border-4 border-white rounded-lg">
-            <div className="absolute top-0 left-0 w-12 h-12 border-t-8 border-l-8 border-blue-500 -mt-2 -ml-2 rounded-tl-lg"></div>
-            <div className="absolute top-0 right-0 w-12 h-12 border-t-8 border-r-8 border-blue-500 -mt-2 -mr-2 rounded-tr-lg"></div>
-            <div className="absolute bottom-0 left-0 w-12 h-12 border-b-8 border-l-8 border-blue-500 -mb-2 -ml-2 rounded-bl-lg"></div>
-            <div className="absolute bottom-0 right-0 w-12 h-12 border-b-8 border-r-8 border-blue-500 -mb-2 -mr-2 rounded-br-lg"></div>
+    <div className="fixed inset-0 bg-black flex flex-col">
+      {/* Header */}
+      <div className="absolute top-0 left-0 right-0 z-20 bg-gradient-to-b from-black/70 to-transparent p-4">
+        <h2 className="text-white text-2xl font-bold text-center">Scan QR Code</h2>
+      </div>
 
-            {/* Scanning line animation */}
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-green-400 to-transparent animate-pulse" 
-                 style={{ animation: 'slide 2s infinite' }}>
+      {/* Scanner */}
+      <div className="flex-1 relative">
+        {cameraActive && (
+          <div id="qr-reader" className="w-full h-full"></div>
+        )}
+
+        {!cameraActive && !cameraError && (
+          <div className="absolute inset-0 flex items-center justify-center">
+            <div className="text-center space-y-4">
+              <Camera className="w-20 h-20 text-white mx-auto animate-pulse" />
+              <p className="text-2xl font-bold text-white">Initializing camera...</p>
+              <p className="text-lg text-white/70">Please allow camera access</p>
             </div>
           </div>
         )}
 
-        {status === 'detected' && (
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-            <div className="bg-green-500 rounded-full p-8 animate-bounce">
-              <CheckCircle className="w-20 h-20 text-white" />
-            </div>
-          </div>
-        )}
-
-        {status === 'error' && (
+        {cameraError && (
           <div className="absolute inset-0 flex items-center justify-center bg-black/70 p-4">
-            <div className="w-full max-w-md bg-white rounded-lg p-6">
-              <div className="flex items-center gap-3 mb-4">
-                <XCircle className="h-6 w-6 text-red-600 flex-shrink-0" />
-                <h3 className="text-lg font-bold text-red-600">Camera Error</h3>
+            <div className="w-full max-w-md bg-white rounded-lg p-6 space-y-4">
+              <div className="flex items-center gap-3">
+                <XCircle className="w-8 h-8 text-red-600 flex-shrink-0" />
+                <h3 className="text-xl font-bold text-red-600">Camera Error</h3>
               </div>
-              <p className="text-gray-700 mb-4">
-                Unable to access camera. Please:
-              </p>
-              <ul className="text-gray-700 space-y-2 text-sm">
-                <li>✓ Allow camera permissions</li>
-                <li>✓ Refresh the page</li>
-                <li>✓ Check if camera is in use by another app</li>
-                <li>✓ Try a different browser</li>
-              </ul>
-            </div>
-          </div>
-        )}
-
-        {status === 'initializing' && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black/70">
-            <div className="text-center">
-              <Camera className="w-20 h-20 text-white mx-auto mb-4 animate-pulse" />
-              <p className="text-white text-2xl font-bold">Initializing camera...</p>
-              <p className="text-white/70 text-lg mt-2">Please allow camera access</p>
+              <p className="text-gray-700">{cameraError}</p>
+              <Button
+                onClick={() => setMode('manual')}
+                className="w-full h-12 bg-blue-600 hover:bg-blue-700 text-white font-bold text-lg"
+              >
+                Use Manual Entry Instead
+              </Button>
             </div>
           </div>
         )}
       </div>
 
-      <style>{`
-        @keyframes slide {
-          0% { top: 0; }
-          50% { top: 100%; }
-          100% { top: 100%; }
-        }
-      `}</style>
+      {/* Instructions */}
+      <div className="absolute bottom-0 left-0 right-0 z-20 bg-gradient-to-t from-black/70 to-transparent p-6">
+        <div className="text-center text-white space-y-2">
+          <p className="text-xl">Position QR code within the frame</p>
+          <button
+            onClick={() => setMode('manual')}
+            className="text-sm text-blue-400 hover:text-blue-300 underline"
+          >
+            Or enter manually
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
