@@ -12,7 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Transaction() {
   const [user, setUser] = useState(null);
-  const [barcode, setBarcode] = useState('');
+  const [productId, setProductId] = useState(null);
   const [transactionType, setTransactionType] = useState('add');
   const [quantity, setQuantity] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
@@ -23,9 +23,9 @@ export default function Transaction() {
   useEffect(() => {
     loadUser();
     const urlParams = new URLSearchParams(window.location.search);
-    const barcodeParam = urlParams.get('barcode');
-    if (barcodeParam) {
-      setBarcode(barcodeParam);
+    const prodId = urlParams.get('productId');
+    if (prodId) {
+      setProductId(prodId);
     }
   }, []);
 
@@ -50,19 +50,22 @@ export default function Transaction() {
     }
   };
 
-  const { data: products = [], isLoading } = useQuery({
-    queryKey: ['products'],
+  const { data: product, isLoading } = useQuery({
+    queryKey: ['product', productId],
     queryFn: async () => {
+      if (!productId) return null;
+      
       const { data, error } = await supabase
         .from('products')
-        .select('*');
+        .select('*')
+        .eq('id', productId)
+        .single();
       
       if (error) throw error;
-      return data || [];
+      return data;
     },
+    enabled: !!productId,
   });
-
-  const product = products.find(p => p.barcode === barcode);
 
   const updateProductMutation = useMutation({
     mutationFn: async ({ id, data }) => {
@@ -74,7 +77,7 @@ export default function Transaction() {
       if (error) throw error;
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['product', productId] });
     }
   });
 
@@ -92,7 +95,7 @@ export default function Transaction() {
   });
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
+    if (e && e.preventDefault) e.preventDefault();
     
     if (!product) {
       setError('Product not found');
@@ -219,7 +222,7 @@ export default function Transaction() {
             </div>
           </CardHeader>
           <CardContent className="p-8">
-            <form onSubmit={handleSubmit} className="space-y-8">
+            <div className="space-y-8">
               {error && (
                 <Alert variant="destructive">
                   <AlertTriangle className="h-6 w-6" />
@@ -240,7 +243,6 @@ export default function Transaction() {
                 <Label className="text-xl font-semibold">Action</Label>
                 <div className="grid grid-cols-2 gap-4">
                   <Button
-                    type="button"
                     onClick={() => setTransactionType('add')}
                     variant={transactionType === 'add' ? 'default' : 'outline'}
                     className="h-20 text-xl font-semibold"
@@ -249,7 +251,6 @@ export default function Transaction() {
                     Add Stock
                   </Button>
                   <Button
-                    type="button"
                     onClick={() => setTransactionType('remove')}
                     variant={transactionType === 'remove' ? 'default' : 'outline'}
                     className="h-20 text-xl font-semibold"
@@ -300,13 +301,13 @@ export default function Transaction() {
               </div>
 
               <Button
-                type="submit"
+                onClick={handleSubmit}
                 disabled={isProcessing || !quantity}
                 className="w-full h-20 text-2xl font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700"
               >
                 {isProcessing ? 'Processing...' : 'Confirm Update'}
               </Button>
-            </form>
+            </div>
           </CardContent>
         </Card>
       </div>

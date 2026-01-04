@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, X, AlertCircle } from 'lucide-react';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 
 export default function QRScanner({ onScan, onError }) {
@@ -30,7 +31,6 @@ export default function QRScanner({ onScan, onError }) {
 
   const initializeScanner = async () => {
     try {
-      // Load jsQR library
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
       script.onload = () => {
@@ -76,6 +76,26 @@ export default function QRScanner({ onScan, onError }) {
     }
   };
 
+  const validateQRCode = async (qrData) => {
+    try {
+      // Query database to check if QR code exists
+      const { data, error } = await supabase
+        .from('products')
+        .select('id, name, barcode')
+        .eq('barcode', qrData)
+        .single();
+
+      if (error || !data) {
+        return { valid: false, error: 'QR code not registered' };
+      }
+
+      return { valid: true, product: data };
+    } catch (err) {
+      console.error('Database validation error:', err);
+      return { valid: false, error: 'Validation error' };
+    }
+  };
+
   const scanFrame = () => {
     if (!videoRef.current || !canvasRef.current || status !== 'scanning') return;
 
@@ -91,26 +111,40 @@ export default function QRScanner({ onScan, onError }) {
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        // Check if jsQR is loaded
         if (window.jsQR) {
           const code = window.jsQR(imageData.data, imageData.width, imageData.height);
           
           if (code && code.data) {
             const now = Date.now();
-            // Prevent duplicate detections within 500ms
             if (now - lastDetectionRef.current > 500 && !detectedCodesRef.current.has(code.data)) {
               console.log('QR Code detected:', code.data);
               detectedCodesRef.current.add(code.data);
               lastDetectionRef.current = now;
               
-              stopCamera();
-              setStatus('detected');
-              
-              // Redirect to transaction page after success animation
-              setTimeout(() => {
-                const barcodeUrl = createPageUrl('Transaction') + `?barcode=${encodeURIComponent(code.data)}`;
-                window.location.href = barcodeUrl;
-              }, 1000);
+              // Validate QR code in database
+              validateQRCode(code.data).then(result => {
+                if (result.valid) {
+                  stopCamera();
+                  setStatus('detected');
+                  
+                  // Redirect to transaction page with productId
+                  setTimeout(() => {
+                    const transactionUrl = createPageUrl('Transaction') + `?productId=${result.product.id}`;
+                    window.location.href = transactionUrl;
+                  }, 1000);
+                } else {
+                  // Invalid QR code - show error and continue scanning
+                  setError('Invalid QR Code: ' + result.error);
+                  setStatus('invalid');
+                  
+                  // Reset after 2 seconds to allow re-scanning
+                  setTimeout(() => {
+                    setError(null);
+                    setStatus('scanning');
+                    detectedCodesRef.current.delete(code.data);
+                  }, 2000);
+                }
+              });
               return;
             }
           }
@@ -125,7 +159,6 @@ export default function QRScanner({ onScan, onError }) {
 
   return (
     <div className="fixed inset-0 bg-black overflow-hidden">
-      {/* Video Stream */}
       <video
         ref={videoRef}
         className="absolute inset-0 w-full h-full object-cover"
@@ -138,16 +171,12 @@ export default function QRScanner({ onScan, onError }) {
       {status === 'scanning' && (
         <div className="absolute inset-0 flex items-center justify-center">
           <div className="relative w-80 h-80">
-            {/* Outer border box */}
             <div className="absolute inset-0 border-2 border-white rounded-lg"></div>
-
-            {/* Corner markers */}
             <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400"></div>
             <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400"></div>
             <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400"></div>
             <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400"></div>
 
-            {/* Animated scanning line */}
             <div
               className="absolute left-0 right-0 h-1 bg-gradient-to-b from-green-400 to-transparent"
               style={{
@@ -156,7 +185,6 @@ export default function QRScanner({ onScan, onError }) {
               }}
             ></div>
 
-            {/* Center crosshair */}
             <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
               <div className="w-6 h-6 border-2 border-white rounded-full opacity-50"></div>
             </div>
@@ -164,15 +192,9 @@ export default function QRScanner({ onScan, onError }) {
 
           <style>{`
             @keyframes scanLine {
-              0% {
-                top: 0%;
-              }
-              50% {
-                top: 100%;
-              }
-              100% {
-                top: 100%;
-              }
+              0% { top: 0%; }
+              50% { top: 100%; }
+              100% { top: 100%; }
             }
           `}</style>
         </div>
@@ -185,6 +207,18 @@ export default function QRScanner({ onScan, onError }) {
             <div className="w-16 h-16 border-4 border-white border-t-blue-500 rounded-full animate-spin mx-auto"></div>
             <p className="text-white text-xl font-semibold">Initializing Camera</p>
             <p className="text-white/60">Please allow camera access</p>
+          </div>
+        </div>
+      )}
+
+      {/* Invalid QR Code State */}
+      {status === 'invalid' && (
+        <div className="absolute inset-0 bg-red-600/90 flex items-center justify-center">
+          <div className="text-center space-y-4">
+            <AlertCircle className="w-24 h-24 text-white mx-auto" />
+            <p className="text-white text-2xl font-bold">Invalid QR Code</p>
+            <p className="text-white/80">{error}</p>
+            <p className="text-white text-sm mt-4">Scanning will resume...</p>
           </div>
         </div>
       )}

@@ -61,6 +61,7 @@ export default function AddProduct() {
     const productData = {
       name: name.trim(),
       category: category.trim() || null,
+      description: description.trim() || null,
       barcode: qrData,
       current_stock: parseInt(initialStock) || 0,
       minimum_threshold: parseInt(minThreshold) || 5,
@@ -88,7 +89,7 @@ export default function AddProduct() {
             <p className="text-lg opacity-90 mt-2">Create a new product with QR code</p>
           </CardHeader>
           <CardContent className="p-8">
-            <form onSubmit={handleSubmit} className="space-y-8">
+            <div className="space-y-8">
               {error && (
                 <Alert variant="destructive">
                   <AlertDescription className="text-lg">{error}</AlertDescription>
@@ -193,14 +194,14 @@ export default function AddProduct() {
               </div>
 
               <Button
-                type="submit"
+                onClick={handleSubmit}
                 disabled={createProductMutation.isPending}
                 className="w-full h-20 text-2xl font-bold bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700"
               >
                 <Save className="w-8 h-8 mr-3" />
                 {createProductMutation.isPending ? 'Creating...' : 'Create Product'}
               </Button>
-            </form>
+            </div>
           </CardContent>
         </Card>
       </div>
