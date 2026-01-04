@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Camera, X, AlertCircle } from 'lucide-react';
+import { createPageUrl } from '@/utils';
 
 export default function QRScanner({ onScan, onError }) {
   const videoRef = useRef(null);
@@ -7,6 +8,8 @@ export default function QRScanner({ onScan, onError }) {
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
   const animationFrameRef = useRef(null);
+  const lastDetectionRef = useRef(0);
+  const detectedCodesRef = useRef(new Set());
 
   useEffect(() => {
     initializeScanner();
@@ -30,8 +33,12 @@ export default function QRScanner({ onScan, onError }) {
       // Load jsQR library
       const script = document.createElement('script');
       script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
-      script.onload = () => startCamera();
+      script.onload = () => {
+        console.log('jsQR loaded successfully');
+        startCamera();
+      };
       script.onerror = () => {
+        console.error('Failed to load jsQR');
         setError('Failed to load scanner library');
         setStatus('error');
       };
@@ -55,9 +62,11 @@ export default function QRScanner({ onScan, onError }) {
 
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
-        videoRef.current.play();
-        setStatus('scanning');
-        scanFrame();
+        videoRef.current.onloadedmetadata = () => {
+          videoRef.current.play();
+          setStatus('scanning');
+          scanFrame();
+        };
       }
     } catch (err) {
       console.error('Camera error:', err);
@@ -74,25 +83,41 @@ export default function QRScanner({ onScan, onError }) {
     const canvas = canvasRef.current;
     const ctx = canvas.getContext('2d');
 
-    if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
-      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    try {
+      if (video.readyState === video.HAVE_ENOUGH_DATA) {
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-      if (window.jsQR) {
-        const code = window.jsQR(imageData.data, imageData.width, imageData.height);
-        
-        if (code) {
-          stopCamera();
-          setStatus('detected');
-          if (onScan) {
-            setTimeout(() => onScan(code.data), 300);
+        // Check if jsQR is loaded
+        if (window.jsQR) {
+          const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+          
+          if (code && code.data) {
+            const now = Date.now();
+            // Prevent duplicate detections within 500ms
+            if (now - lastDetectionRef.current > 500 && !detectedCodesRef.current.has(code.data)) {
+              console.log('QR Code detected:', code.data);
+              detectedCodesRef.current.add(code.data);
+              lastDetectionRef.current = now;
+              
+              stopCamera();
+              setStatus('detected');
+              
+              // Redirect to transaction page after success animation
+              setTimeout(() => {
+                const barcodeUrl = createPageUrl('Transaction') + `?barcode=${encodeURIComponent(code.data)}`;
+                window.location.href = barcodeUrl;
+              }, 1000);
+              return;
+            }
           }
-          return;
         }
       }
+    } catch (err) {
+      console.error('Scan error:', err);
     }
 
     animationFrameRef.current = requestAnimationFrame(scanFrame);
@@ -112,51 +137,44 @@ export default function QRScanner({ onScan, onError }) {
       {/* Scanning Grid Overlay */}
       {status === 'scanning' && (
         <div className="absolute inset-0 flex items-center justify-center">
-          {/* Corner markers */}
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-            <svg width="300" height="300" className="drop-shadow-lg">
-              {/* Top-left corner */}
-              <line x1="20" y1="20" x2="70" y2="20" stroke="#fff" strokeWidth="4" />
-              <line x1="20" y1="20" x2="20" y2="70" stroke="#fff" strokeWidth="4" />
-              
-              {/* Top-right corner */}
-              <line x1="230" y1="20" x2="280" y2="20" stroke="#fff" strokeWidth="4" />
-              <line x1="280" y1="20" x2="280" y2="70" stroke="#fff" strokeWidth="4" />
-              
-              {/* Bottom-left corner */}
-              <line x1="20" y1="230" x2="70" y2="230" stroke="#fff" strokeWidth="4" />
-              <line x1="20" y1="280" x2="20" y2="230" stroke="#fff" strokeWidth="4" />
-              
-              {/* Bottom-right corner */}
-              <line x1="230" y1="230" x2="280" y2="230" stroke="#fff" strokeWidth="4" />
-              <line x1="280" y1="280" x2="280" y2="230" stroke="#fff" strokeWidth="4" />
+          <div className="relative w-80 h-80">
+            {/* Outer border box */}
+            <div className="absolute inset-0 border-2 border-white rounded-lg"></div>
 
-              {/* Animated scanning line */}
-              <line
-                x1="20"
-                y1="150"
-                x2="280"
-                y2="150"
-                stroke="#00ff00"
-                strokeWidth="2"
-                opacity="0.7"
-                className="animate-pulse"
-              >
-                <animate
-                  attributeName="y1"
-                  attributeName2="y2"
-                  values="20;280;20"
-                  dur="2s"
-                  repeatCount="indefinite"
-                />
-              </line>
-            </svg>
+            {/* Corner markers */}
+            <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400"></div>
+            <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400"></div>
+            <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400"></div>
+            <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400"></div>
+
+            {/* Animated scanning line */}
+            <div
+              className="absolute left-0 right-0 h-1 bg-gradient-to-b from-green-400 to-transparent"
+              style={{
+                animation: 'scanLine 2s linear infinite',
+                top: '0%'
+              }}
+            ></div>
+
+            {/* Center crosshair */}
+            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
+              <div className="w-6 h-6 border-2 border-white rounded-full opacity-50"></div>
+            </div>
           </div>
 
-          {/* Center crosshair */}
-          <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-            <div className="w-8 h-8 border-2 border-white rounded-full opacity-50"></div>
-          </div>
+          <style>{`
+            @keyframes scanLine {
+              0% {
+                top: 0%;
+              }
+              50% {
+                top: 100%;
+              }
+              100% {
+                top: 100%;
+              }
+            }
+          `}</style>
         </div>
       )}
 
@@ -173,29 +191,28 @@ export default function QRScanner({ onScan, onError }) {
 
       {/* Detected State */}
       {status === 'detected' && (
-        <div className="absolute inset-0 bg-green-600/80 flex items-center justify-center">
+        <div className="absolute inset-0 bg-green-600/90 flex items-center justify-center">
           <div className="text-center space-y-4">
             <svg
               className="w-24 h-24 text-white mx-auto animate-bounce"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
+              fill="currentColor"
+              viewBox="0 0 20 20"
             >
               <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
+                fillRule="evenodd"
+                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                clipRule="evenodd"
               />
             </svg>
-            <p className="text-white text-2xl font-bold">QR Code Found!</p>
+            <p className="text-white text-2xl font-bold">QR Code Detected!</p>
+            <p className="text-white/80">Redirecting...</p>
           </div>
         </div>
       )}
 
       {/* Error State */}
       {status === 'error' && (
-        <div className="absolute inset-0 bg-red-600/80 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-red-600/90 flex items-center justify-center p-4">
           <div className="bg-white rounded-lg p-6 max-w-sm w-full space-y-4">
             <div className="flex items-center gap-3">
               <AlertCircle className="w-8 h-8 text-red-600" />
@@ -204,7 +221,7 @@ export default function QRScanner({ onScan, onError }) {
             <p className="text-gray-700">{error}</p>
             <button
               onClick={() => window.location.reload()}
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg"
+              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition"
             >
               Retry
             </button>
@@ -214,17 +231,20 @@ export default function QRScanner({ onScan, onError }) {
 
       {/* Bottom Info */}
       {status === 'scanning' && (
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/70 to-transparent p-6 text-center">
-          <p className="text-white text-lg font-semibold">Position QR code in frame</p>
-          <p className="text-white/60 text-sm mt-1">Keep steady for scanning</p>
+        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-6 text-center">
+          <p className="text-white text-lg font-semibold">Position QR Code in Frame</p>
+          <p className="text-white/60 text-sm mt-1">Keep steady for automatic scanning</p>
         </div>
       )}
 
       {/* Top Bar */}
       {status === 'scanning' && (
-        <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/70 to-transparent p-4 flex items-center justify-between z-10">
+        <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4 flex items-center justify-between z-10">
           <h2 className="text-white text-xl font-bold">QR Scanner</h2>
-          <button className="p-2 hover:bg-white/20 rounded-full transition">
+          <button 
+            onClick={() => window.location.href = createPageUrl('Dashboard')}
+            className="p-2 hover:bg-white/20 rounded-full transition"
+          >
             <X className="w-6 h-6 text-white" />
           </button>
         </div>
