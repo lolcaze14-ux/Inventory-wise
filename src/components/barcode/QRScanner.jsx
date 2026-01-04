@@ -24,7 +24,10 @@ export default function QRScanner({ onScan, onError }) {
       script.async = true;
       
       script.onload = () => {
-        initializeScanner();
+        // Wait for DOM to be ready
+        setTimeout(() => {
+          initializeScanner();
+        }, 500);
       };
       
       script.onerror = () => {
@@ -85,9 +88,7 @@ export default function QRScanner({ onScan, onError }) {
 
   return (
     <div className="relative w-full h-full bg-black flex items-center justify-center">
-      {status === 'ready' && (
-        <div id="qr-reader" className="w-full h-full"></div>
-      )}
+      <div id="qr-reader" className={`w-full h-full ${status !== 'ready' ? 'hidden' : ''}`}></div>
 
       {/* Overlay instructions */}
       {status === 'ready' && (
