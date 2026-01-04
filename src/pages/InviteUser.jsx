@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { base44 } from '@/api/base44Client';
 import { createPageUrl } from '@/utils';
-import { useMutation } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +13,7 @@ export default function InviteUser() {
   const [email, setEmail] = useState('');
   const [inviteLink, setInviteLink] = useState('');
   const [copied, setCopied] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     loadUser();
@@ -32,26 +32,22 @@ export default function InviteUser() {
     }
   };
 
-  const createInviteMutation = useMutation({
-    mutationFn: async (inviteEmail) => {
-      const invitation = await base44.entities.Invitation.create({
-        email: inviteEmail,
-        invited_by: user.id
-      });
-      return invitation;
-    },
-    onSuccess: (invitation) => {
-      // Create invite link with email and timestamp in URL (no database needed!)
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    try {
+      // Generate invite link with email and timestamp (no database call needed!)
       const timestamp = Date.now();
       const link = `${window.location.origin}${createPageUrl('UserSignup')}?email=${encodeURIComponent(email)}&t=${timestamp}`;
       setInviteLink(link);
       setEmail('');
+    } catch (error) {
+      console.error('Error generating invite link:', error);
+      alert('Failed to generate invite link');
+    } finally {
+      setIsLoading(false);
     }
-  });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    createInviteMutation.mutate(email);
   };
 
   const copyToClipboard = () => {
@@ -100,11 +96,11 @@ export default function InviteUser() {
 
               <Button
                 type="submit"
-                disabled={createInviteMutation.isPending}
+                disabled={isLoading}
                 className="w-full h-16 text-xl font-bold bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700"
               >
                 <Send className="w-6 h-6 mr-3" />
-                {createInviteMutation.isPending ? 'Generating Link...' : 'Generate Invite Link'}
+                {isLoading ? 'Generating Link...' : 'Generate Invite Link'}
               </Button>
             </form>
 
