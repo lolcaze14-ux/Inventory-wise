@@ -7,11 +7,6 @@ import QRScanner from '../components/barcode/QRScanner';
 export default function Scanner() {
   const [isScanning, setIsScanning] = useState(true);
 
-  const handleScan = (qrData) => {
-    setIsScanning(false);
-    window.location.href = createPageUrl('Transaction') + `?barcode=${encodeURIComponent(qrData)}`;
-  };
-
   const handleError = (error) => {
     console.error('Scanner error:', error);
   };
@@ -37,7 +32,7 @@ export default function Scanner() {
       {/* Scanner */}
       <div className="flex-1 relative">
         {isScanning && (
-          <QRScanner onScan={handleScan} onError={handleError} />
+          <QRScanner onError={handleError} />
         )}
       </div>
 
