@@ -5,7 +5,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ArrowLeft, Save, RefreshCw } from 'lucide-react';
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -13,8 +13,6 @@ import QRGenerator from '../components/barcode/QRGenerator';
 
 export default function AddProduct() {
   const [name, setName] = useState('');
-  const [category, setCategory] = useState('');
-  const [description, setDescription] = useState('');
   const [qrData, setQrData] = useState('');
   const [initialStock, setInitialStock] = useState('0');
   const [minThreshold, setMinThreshold] = useState('5');
@@ -60,8 +58,6 @@ export default function AddProduct() {
 
     const productData = {
       name: name.trim(),
-      category: category.trim() || null,
-      description: description.trim() || null,
       barcode: qrData,
       current_stock: parseInt(initialStock) || 0,
       minimum_threshold: parseInt(minThreshold) || 5,
@@ -109,28 +105,6 @@ export default function AddProduct() {
                     placeholder="e.g., Bananas, Office Pens"
                     className="h-14 text-lg"
                     required
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <Label htmlFor="category" className="text-lg font-semibold">Category</Label>
-                  <Input
-                    id="category"
-                    value={category}
-                    onChange={(e) => setCategory(e.target.value)}
-                    placeholder="e.g., Food, Office Supplies"
-                    className="h-14 text-lg"
-                  />
-                </div>
-
-                <div className="space-y-3">
-                  <Label htmlFor="description" className="text-lg font-semibold">Description</Label>
-                  <Textarea
-                    id="description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Additional details..."
-                    className="min-h-24 text-lg"
                   />
                 </div>
               </div>
