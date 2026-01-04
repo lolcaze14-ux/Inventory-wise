@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -75,7 +75,26 @@ export default function UserSignup() {
     }
 
     try {
-      await base44.auth.signup(email, password, fullName, 'user');
+      // Create auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+      });
+
+      if (authError) throw authError;
+
+      // Create user profile in database
+      const { error: profileError } = await supabase
+        .from('users')
+        .insert({
+          id: authData.user.id,
+          email: email,
+          full_name: fullName,
+          role: 'user',
+        });
+
+      if (profileError) throw profileError;
+
       window.location.href = createPageUrl('Dashboard');
     } catch (err) {
       setError(err.message || 'Failed to create account');

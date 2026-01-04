@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,8 +23,27 @@ export default function AdminSignup() {
     setIsLoading(true);
 
     try {
-      await base44.auth.signup(email, password, fullName, 'admin');
-      // Use React Router's navigate instead of window.location.href
+      // Create auth user
+      const { data: authData, error: authError } = await supabase.auth.signUp({
+        email: email,
+        password: password,
+      });
+
+      if (authError) throw authError;
+
+      // Create user profile in database
+      const { error: profileError } = await supabase
+        .from('users')
+        .insert({
+          id: authData.user.id,
+          email: email,
+          full_name: fullName,
+          role: 'admin',
+        });
+
+      if (profileError) throw profileError;
+
+      // Redirect to admin dashboard
       navigate(createPageUrl('AdminDashboard'));
     } catch (err) {
       setError(err.message || 'Failed to create admin account');

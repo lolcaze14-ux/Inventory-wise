@@ -1,11 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Plus, Minus, Package } from 'lucide-react';
+import { ArrowLeft, Package } from 'lucide-react';
 import { Skeleton } from "@/components/ui/skeleton";
 import { format } from 'date-fns';
 
@@ -18,7 +18,19 @@ export default function ActivityLog() {
 
   const loadUser = async () => {
     try {
-      const userData = await base44.auth.me();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        window.location.href = createPageUrl('Login');
+        return;
+      }
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
       setUser(userData);
     } catch (error) {
       window.location.href = createPageUrl('Login');
@@ -27,7 +39,16 @@ export default function ActivityLog() {
 
   const { data: transactions = [], isLoading } = useQuery({
     queryKey: ['my-transactions', user?.id],
-    queryFn: () => base44.entities.Transaction.filter({ user_id: user.id }, '-created_date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('activity_logs')
+        .select('*')
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
     enabled: !!user
   });
 
@@ -68,44 +89,19 @@ export default function ActivityLog() {
                     key={tx.id}
                     className="p-6 border-2 rounded-lg hover:shadow-md transition-shadow bg-white"
                   >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          {tx.transaction_type === 'add' ? (
-                            <Plus className="w-6 h-6 text-green-600" />
-                          ) : (
-                            <Minus className="w-6 h-6 text-red-600" />
-                          )}
-                          <h3 className="text-xl font-bold text-gray-900">
-                            {tx.product_name}
-                          </h3>
-                        </div>
-                        
-                        <div className="space-y-1 text-base text-gray-600 ml-9">
-                          <p>
-                            <span className="font-semibold">Action:</span>{' '}
-                            <span className={tx.transaction_type === 'add' ? 'text-green-600' : 'text-red-600'}>
-                              {tx.transaction_type === 'add' ? 'Added' : 'Removed'} {Math.abs(tx.quantity_change)} units
-                            </span>
-                          </p>
-                          <p>
-                            <span className="font-semibold">Previous Stock:</span> {tx.previous_stock}
-                          </p>
-                          <p>
-                            <span className="font-semibold">New Stock:</span> {tx.resulting_stock}
-                          </p>
-                          <p className="text-gray-500">
-                            {format(new Date(tx.created_date), 'PPpp')}
-                          </p>
-                        </div>
-                      </div>
+                    <div className="space-y-2">
+                      <h3 className="text-xl font-bold text-gray-900">
+                        {tx.action}
+                      </h3>
                       
-                      <Badge
-                        variant={tx.transaction_type === 'add' ? 'default' : 'destructive'}
-                        className="text-lg font-bold px-4 py-2"
-                      >
-                        {tx.transaction_type === 'add' ? '+' : '-'}{Math.abs(tx.quantity_change)}
-                      </Badge>
+                      <div className="space-y-1 text-base text-gray-600">
+                        <p>
+                          <span className="font-semibold">Product:</span> {tx.product_id || 'N/A'}
+                        </p>
+                        <p className="text-gray-500">
+                          {format(new Date(tx.created_at), 'PPpp')}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 ))}

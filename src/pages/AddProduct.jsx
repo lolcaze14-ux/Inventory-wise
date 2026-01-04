@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl, generateBarcode } from '@/utils';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,15 @@ export default function AddProduct() {
   };
 
   const createProductMutation = useMutation({
-    mutationFn: (productData) => base44.entities.Product.create(productData),
+    mutationFn: async (productData) => {
+      const { data, error } = await supabase
+        .from('products')
+        .insert(productData)
+        .select();
+      
+      if (error) throw error;
+      return data;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['products'] });
       window.location.href = createPageUrl('Dashboard');
@@ -52,12 +60,11 @@ export default function AddProduct() {
 
     const productData = {
       name: name.trim(),
-      category: category.trim(),
-      description: description.trim(),
-      barcode_data: qrData,
-      barcode_type: 'QR',
+      category: category.trim() || null,
+      barcode: qrData,
       current_stock: parseInt(initialStock) || 0,
-      minimum_threshold: parseInt(minThreshold) || 5
+      minimum_threshold: parseInt(minThreshold) || 5,
+      updated_date: new Date().toISOString()
     };
 
     createProductMutation.mutate(productData);

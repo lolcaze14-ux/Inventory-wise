@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,21 @@ export default function Dashboard() {
 
   const loadUser = async () => {
     try {
-      const userData = await base44.auth.me();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        window.location.href = createPageUrl('Login');
+        return;
+      }
+
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error) throw error;
+
       setUser(userData);
       
       if (userData.role === 'admin') {
@@ -33,21 +47,35 @@ export default function Dashboard() {
 
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['products'],
-    queryFn: () => base44.entities.Product.list('-name'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('name');
+      
+      if (error) throw error;
+      return data || [];
+    },
   });
 
   const filteredProducts = products.filter(p => 
     p.name.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  const handleLogout = () => {
-    base44.auth.logout(createPageUrl('Login'));
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = createPageUrl('Login');
   };
 
   const handleDelete = async (product) => {
     if (window.confirm(`Delete "${product.name}"? This cannot be undone.`)) {
       try {
-        await base44.entities.Product.delete(product.id);
+        const { error } = await supabase
+          .from('products')
+          .delete()
+          .eq('id', product.id);
+
+        if (error) throw error;
         queryClient.invalidateQueries({ queryKey: ['products'] });
       } catch (error) {
         alert('Failed to delete product');

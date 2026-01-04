@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
@@ -31,7 +31,19 @@ export default function Transaction() {
 
   const loadUser = async () => {
     try {
-      const userData = await base44.auth.me();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        window.location.href = createPageUrl('Login');
+        return;
+      }
+
+      const { data: userData } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
       setUser(userData);
     } catch (error) {
       window.location.href = createPageUrl('Login');
@@ -40,22 +52,42 @@ export default function Transaction() {
 
   const { data: products = [], isLoading } = useQuery({
     queryKey: ['products'],
-    queryFn: () => base44.entities.Product.list(),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*');
+      
+      if (error) throw error;
+      return data || [];
+    },
   });
 
-  const product = products.find(p => p.barcode_data === barcode);
+  const product = products.find(p => p.barcode === barcode);
 
-  const createAlertMutation = useMutation({
-    mutationFn: (alertData) => base44.entities.Alert.create(alertData),
+  const updateProductMutation = useMutation({
+    mutationFn: async ({ id, data }) => {
+      const { error } = await supabase
+        .from('products')
+        .update(data)
+        .eq('id', id);
+      
+      if (error) throw error;
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['alerts'] });
+      queryClient.invalidateQueries({ queryKey: ['products'] });
     }
   });
 
-  const updateProductMutation = useMutation({
-    mutationFn: ({ id, data }) => base44.entities.Product.update(id, data),
+  const createAlertMutation = useMutation({
+    mutationFn: async (alertData) => {
+      const { error } = await supabase
+        .from('alerts')
+        .insert(alertData);
+      
+      if (error) throw error;
+    },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['products'] });
+      queryClient.invalidateQueries({ queryKey: ['alerts'] });
     }
   });
 
@@ -88,7 +120,10 @@ export default function Transaction() {
 
       await updateProductMutation.mutateAsync({
         id: product.id,
-        data: { current_stock: newStock }
+        data: { 
+          current_stock: newStock,
+          updated_date: new Date().toISOString()
+        }
       });
 
       if (newStock <= product.minimum_threshold) {

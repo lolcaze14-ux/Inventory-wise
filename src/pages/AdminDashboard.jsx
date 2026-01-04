@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,21 @@ export default function AdminDashboard() {
 
   const loadUser = async () => {
     try {
-      const userData = await base44.auth.me();
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (!session) {
+        window.location.href = createPageUrl('Login');
+        return;
+      }
+
+      const { data: userData, error } = await supabase
+        .from('users')
+        .select('*')
+        .eq('id', session.user.id)
+        .single();
+
+      if (error) throw error;
+
       setUser(userData);
       
       if (userData.role !== 'admin') {
@@ -33,21 +47,52 @@ export default function AdminDashboard() {
 
   const { data: products = [], isLoading: loadingProducts } = useQuery({
     queryKey: ['products'],
-    queryFn: () => base44.entities.Product.list('-updated_date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('products')
+        .select('*')
+        .order('updated_date', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
   });
 
   const { data: alerts = [], isLoading: loadingAlerts } = useQuery({
     queryKey: ['alerts'],
-    queryFn: () => base44.entities.Alert.filter({ is_resolved: false }, '-created_date'),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('alerts')
+        .select('*')
+        .eq('is_resolved', false)
+        .order('created_date', { ascending: false });
+      
+      if (error) throw error;
+      return data || [];
+    },
   });
 
   const { data: users = [], isLoading: loadingUsers } = useQuery({
     queryKey: ['users'],
-    queryFn: () => base44.entities.User.list(),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('users')
+        .select('*');
+      
+      if (error) throw error;
+      return data || [];
+    },
   });
 
   const resolveAlertMutation = useMutation({
-    mutationFn: ({ id }) => base44.entities.Alert.update(id, { is_resolved: true, is_read: true }),
+    mutationFn: async ({ id }) => {
+      const { error } = await supabase
+        .from('alerts')
+        .update({ is_resolved: true, is_read: true })
+        .eq('id', id);
+      
+      if (error) throw error;
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['alerts'] });
     }
@@ -57,14 +102,20 @@ export default function AdminDashboard() {
     resolveAlertMutation.mutate({ id: alertId });
   };
 
-  const handleLogout = () => {
-    base44.auth.logout(createPageUrl('Login'));
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    window.location.href = createPageUrl('Login');
   };
 
   const handleDeleteProduct = async (product) => {
     if (window.confirm(`Delete "${product.name}"? This cannot be undone.`)) {
       try {
-        await base44.entities.Product.delete(product.id);
+        const { error } = await supabase
+          .from('products')
+          .delete()
+          .eq('id', product.id);
+
+        if (error) throw error;
         queryClient.invalidateQueries({ queryKey: ['products'] });
       } catch (error) {
         alert('Failed to delete product');

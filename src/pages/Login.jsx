@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { base44 } from '@/api/base44Client';
+import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -20,9 +20,17 @@ export default function Login() {
 
   const checkAuth = async () => {
     try {
-      const userData = await base44.auth.me();
-      if (userData) {
-        if (userData.role === 'admin') {
+      const { data: { session } } = await supabase.auth.getSession();
+      
+      if (session) {
+        // Get user profile to check role
+        const { data: userData } = await supabase
+          .from('users')
+          .select('role')
+          .eq('id', session.user.id)
+          .single();
+
+        if (userData?.role === 'admin') {
           window.location.href = createPageUrl('AdminDashboard');
         } else {
           window.location.href = createPageUrl('Dashboard');
@@ -39,16 +47,29 @@ export default function Login() {
     setIsLoading(true);
 
     try {
-      await base44.auth.login(email, password);
-      const userData = await base44.auth.me();
-      
+      const { data, error: signInError } = await supabase.auth.signInWithPassword({
+        email: email,
+        password: password,
+      });
+
+      if (signInError) throw signInError;
+
+      // Get user profile to check role
+      const { data: userData, error: userError } = await supabase
+        .from('users')
+        .select('role')
+        .eq('id', data.user.id)
+        .single();
+
+      if (userError) throw userError;
+
       if (userData.role === 'admin') {
         window.location.href = createPageUrl('AdminDashboard');
       } else {
         window.location.href = createPageUrl('Dashboard');
       }
     } catch (err) {
-      setError('Invalid email or password');
+      setError(err.message || 'Invalid email or password');
       setIsLoading(false);
     }
   };
