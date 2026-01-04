@@ -3,7 +3,7 @@ import { Camera, X, AlertCircle } from 'lucide-react';
 import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 
-export default function QRScanner({ onScan, onError }) {
+export default function QRScanner({ onError }) {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [status, setStatus] = useState('loading');
@@ -11,7 +11,6 @@ export default function QRScanner({ onScan, onError }) {
   const animationFrameRef = useRef(null);
   const lastDetectionRef = useRef(0);
   const detectedCodesRef = useRef(new Set());
-  const jsQRRef = useRef(null);
 
   useEffect(() => {
     initializeScanner();
@@ -30,55 +29,55 @@ export default function QRScanner({ onScan, onError }) {
     }
   };
 
-  const loadJsQR = () => {
-    return new Promise((resolve, reject) => {
-      if (window.jsQR) {
-        console.log('jsQR already in window');
-        resolve(window.jsQR);
-        return;
-      }
-
+  const initializeScanner = async () => {
+    try {
+      console.log('Loading ZXing library...');
+      
+      // Load ZXing library which is more reliable
       const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+      script.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
       script.async = true;
 
       script.onload = () => {
-        console.log('jsQR script loaded, checking window.jsQR...');
-        if (window.jsQR) {
-          console.log('jsQR found in window');
-          jsQRRef.current = window.jsQR;
-          resolve(window.jsQR);
-        } else {
-          console.error('jsQR not found in window after script load');
-          reject(new Error('jsQR failed to initialize'));
-        }
+        console.log('ZXing library loaded');
+        startCamera();
       };
 
       script.onerror = () => {
-        console.error('Failed to load jsQR script');
-        reject(new Error('Failed to load jsQR library'));
+        console.error('Failed to load ZXing library, trying jsQR fallback...');
+        loadJsQR();
       };
 
       document.head.appendChild(script);
-    });
-  };
-
-  const initializeScanner = async () => {
-    try {
-      console.log('Initializing scanner...');
-      await loadJsQR();
-      console.log('jsQR loaded successfully, starting camera...');
-      startCamera();
     } catch (err) {
       console.error('Init error:', err);
-      setError(err.message);
+      setError('Failed to initialize scanner');
       setStatus('error');
     }
   };
 
+  const loadJsQR = () => {
+    const script = document.createElement('script');
+    script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
+    script.async = true;
+
+    script.onload = () => {
+      console.log('jsQR loaded as fallback');
+      startCamera();
+    };
+
+    script.onerror = () => {
+      console.error('Failed to load any QR library');
+      setError('Failed to load scanner library');
+      setStatus('error');
+    };
+
+    document.head.appendChild(script);
+  };
+
   const startCamera = async () => {
     try {
-      console.log('Requesting camera access...');
+      console.log('Requesting camera...');
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           facingMode: 'environment',
@@ -88,27 +87,21 @@ export default function QRScanner({ onScan, onError }) {
         audio: false
       });
 
-      console.log('Camera stream obtained, video resolution:', stream.getVideoTracks()[0].getSettings());
+      console.log('✅ Camera access granted');
       
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         
         videoRef.current.onloadedmetadata = () => {
-          console.log('Video metadata loaded');
+          console.log('✅ Video ready');
           videoRef.current.play();
           setStatus('scanning');
           scanFrame();
         };
-
-        videoRef.current.onerror = (err) => {
-          console.error('Video error:', err);
-          setError('Video playback error');
-          setStatus('error');
-        };
       }
     } catch (err) {
-      console.error('Camera error:', err);
-      setError('Camera access denied. Please allow camera permissions.');
+      console.error('❌ Camera error:', err);
+      setError('Camera access denied or unavailable');
       setStatus('error');
       if (onError) onError(err);
     }
@@ -116,7 +109,8 @@ export default function QRScanner({ onScan, onError }) {
 
   const validateQRCode = async (qrData) => {
     try {
-      console.log('Validating QR code:', qrData);
+      console.log('🔍 Checking barcode in database:', qrData);
+      
       const { data, error } = await supabase
         .from('products')
         .select('id, name, barcode')
@@ -124,20 +118,15 @@ export default function QRScanner({ onScan, onError }) {
         .single();
 
       if (error) {
-        console.error('Database error:', error);
+        console.log('❌ Not found in database');
         return { valid: false, error: 'QR code not registered' };
       }
 
-      if (!data) {
-        console.log('No product found for barcode:', qrData);
-        return { valid: false, error: 'QR code not registered' };
-      }
-
-      console.log('QR code valid, product:', data.name);
+      console.log('✅ Found product:', data.name);
       return { valid: true, product: data };
     } catch (err) {
       console.error('Validation error:', err);
-      return { valid: false, error: 'Validation error' };
+      return { valid: false, error: 'Database error' };
     }
   };
 
@@ -152,53 +141,32 @@ export default function QRScanner({ onScan, onError }) {
       if (video.readyState === video.HAVE_ENOUGH_DATA) {
         canvas.width = video.videoWidth;
         canvas.height = video.videoHeight;
-        
-        // Draw video frame to canvas
         ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
 
-        // Use jsQR to detect QR codes
-        const jsQR = jsQRRef.current || window.jsQR;
-        
-        if (jsQR) {
-          const code = jsQR(imageData.data, imageData.width, imageData.height);
-          
-          if (code && code.data) {
-            const now = Date.now();
+        // Try ZXing first
+        if (window.ZXing) {
+          try {
+            const codeReader = new window.ZXing.BrowserMultiFormatReader();
+            const result = codeReader.decodeFromImageData(imageData, canvas.width, canvas.height);
             
-            if (now - lastDetectionRef.current > 500 && !detectedCodesRef.current.has(code.data)) {
-              console.log('✅ QR Code detected:', code.data);
-              detectedCodesRef.current.add(code.data);
-              lastDetectionRef.current = now;
-              
-              // Validate in database
-              validateQRCode(code.data).then(result => {
-                if (result.valid) {
-                  console.log('✅ Redirecting to product:', result.product.name);
-                  stopCamera();
-                  setStatus('detected');
-                  
-                  setTimeout(() => {
-                    const transactionUrl = createPageUrl('Transaction') + `?productId=${result.product.id}`;
-                    window.location.href = transactionUrl;
-                  }, 1000);
-                } else {
-                  console.log('❌ Invalid QR code');
-                  setError('Invalid QR Code: ' + result.error);
-                  setStatus('invalid');
-                  
-                  setTimeout(() => {
-                    setError(null);
-                    setStatus('scanning');
-                    detectedCodesRef.current.delete(code.data);
-                  }, 2000);
-                }
-              });
+            if (result && result.text) {
+              handleQRDetection(result.text);
               return;
             }
+          } catch (e) {
+            // No code detected, continue
           }
-        } else {
-          console.warn('⚠️ jsQR not available');
+        }
+
+        // Fallback to jsQR
+        if (window.jsQR) {
+          const code = window.jsQR(imageData.data, imageData.width, imageData.height);
+          if (code && code.data) {
+            handleQRDetection(code.data);
+            return;
+          }
         }
       }
     } catch (err) {
@@ -206,6 +174,39 @@ export default function QRScanner({ onScan, onError }) {
     }
 
     animationFrameRef.current = requestAnimationFrame(scanFrame);
+  };
+
+  const handleQRDetection = (qrData) => {
+    const now = Date.now();
+    
+    if (now - lastDetectionRef.current > 500 && !detectedCodesRef.current.has(qrData)) {
+      console.log('🎯 QR Code scanned:', qrData);
+      detectedCodesRef.current.add(qrData);
+      lastDetectionRef.current = now;
+      
+      validateQRCode(qrData).then(result => {
+        if (result.valid) {
+          console.log('✅ Valid QR - Redirecting');
+          stopCamera();
+          setStatus('detected');
+          
+          setTimeout(() => {
+            const transactionUrl = createPageUrl('Transaction') + `?productId=${result.product.id}`;
+            window.location.href = transactionUrl;
+          }, 1000);
+        } else {
+          console.log('❌ Invalid QR - Showing error');
+          setError('Product not found: ' + result.error);
+          setStatus('invalid');
+          
+          setTimeout(() => {
+            setError(null);
+            setStatus('scanning');
+            detectedCodesRef.current.delete(qrData);
+          }, 2000);
+        }
+      });
+    }
   };
 
   return (
@@ -257,7 +258,7 @@ export default function QRScanner({ onScan, onError }) {
           <div className="text-center space-y-4">
             <div className="w-16 h-16 border-4 border-white border-t-blue-500 rounded-full animate-spin mx-auto"></div>
             <p className="text-white text-xl font-semibold">Initializing Scanner</p>
-            <p className="text-white/60">Loading QR library...</p>
+            <p className="text-white/60">Loading QR detection library...</p>
           </div>
         </div>
       )}
@@ -267,7 +268,7 @@ export default function QRScanner({ onScan, onError }) {
         <div className="absolute inset-0 bg-red-600/90 flex items-center justify-center">
           <div className="text-center space-y-4">
             <AlertCircle className="w-24 h-24 text-white mx-auto" />
-            <p className="text-white text-2xl font-bold">Invalid QR Code</p>
+            <p className="text-white text-2xl font-bold">Product Not Found</p>
             <p className="text-white/80">{error}</p>
             <p className="text-white text-sm mt-4">Scanning will resume...</p>
           </div>
