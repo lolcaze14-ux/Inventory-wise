@@ -1,128 +1,57 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { Camera, X, AlertCircle } from 'lucide-react';
+import React, { useRef, useState } from 'react';
+import { Upload, X, AlertCircle, CheckCircle } from 'lucide-react';
 import { supabase } from '@/api/supabaseClient';
 import { createPageUrl } from '@/utils';
 
-export default function QRScanner({ onError }) {
-  const videoRef = useRef(null);
+export default function QRScanner() {
+  const fileInputRef = useRef(null);
   const canvasRef = useRef(null);
-  const [status, setStatus] = useState('loading');
+  const [status, setStatus] = useState('idle');
   const [error, setError] = useState(null);
-  const animationFrameRef = useRef(null);
-  const lastDetectionRef = useRef(0);
-  const detectedCodesRef = useRef(new Set());
+  const [preview, setPreview] = useState(null);
 
-  useEffect(() => {
-    initializeScanner();
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
+  const loadQRLibrary = () => {
+    return new Promise((resolve, reject) => {
+      if (window.jsQR) {
+        resolve(window.jsQR);
+        return;
       }
-      stopCamera();
-    };
-  }, []);
 
-  const stopCamera = () => {
-    if (videoRef.current && videoRef.current.srcObject) {
-      const tracks = videoRef.current.srcObject.getTracks();
-      tracks.forEach(track => track.stop());
-    }
-  };
-
-  const initializeScanner = async () => {
-    try {
-      console.log('Loading ZXing library...');
-      
-      // Load ZXing library which is more reliable
       const script = document.createElement('script');
-      script.src = 'https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js';
+      script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
       script.async = true;
 
       script.onload = () => {
-        console.log('ZXing library loaded');
-        startCamera();
+        if (window.jsQR) {
+          resolve(window.jsQR);
+        } else {
+          reject(new Error('jsQR failed to initialize'));
+        }
       };
 
       script.onerror = () => {
-        console.error('Failed to load ZXing library, trying jsQR fallback...');
-        loadJsQR();
+        reject(new Error('Failed to load jsQR library'));
       };
 
       document.head.appendChild(script);
-    } catch (err) {
-      console.error('Init error:', err);
-      setError('Failed to initialize scanner');
-      setStatus('error');
-    }
-  };
-
-  const loadJsQR = () => {
-    const script = document.createElement('script');
-    script.src = 'https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js';
-    script.async = true;
-
-    script.onload = () => {
-      console.log('jsQR loaded as fallback');
-      startCamera();
-    };
-
-    script.onerror = () => {
-      console.error('Failed to load any QR library');
-      setError('Failed to load scanner library');
-      setStatus('error');
-    };
-
-    document.head.appendChild(script);
-  };
-
-  const startCamera = async () => {
-    try {
-      console.log('Requesting camera...');
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: 'environment',
-          width: { ideal: 1280 },
-          height: { ideal: 720 }
-        },
-        audio: false
-      });
-
-      console.log('✅ Camera access granted');
-      
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        
-        videoRef.current.onloadedmetadata = () => {
-          console.log('✅ Video ready');
-          videoRef.current.play();
-          setStatus('scanning');
-          scanFrame();
-        };
-      }
-    } catch (err) {
-      console.error('❌ Camera error:', err);
-      setError('Camera access denied or unavailable');
-      setStatus('error');
-      if (onError) onError(err);
-    }
+    });
   };
 
   const validateQRCode = async (qrData) => {
     try {
-      console.log('🔍 Checking barcode in database:', qrData);
-      
+      console.log('Validating QR code:', qrData);
       const { data, error } = await supabase
         .from('products')
         .select('id, name, barcode')
         .eq('barcode', qrData)
         .single();
 
-      if (error) {
-        console.log('❌ Not found in database');
-        return { valid: false, error: 'QR code not registered' };
+      if (error || !data) {
+        console.log('Product not found');
+        return { valid: false, error: 'Product not found in database' };
       }
 
-      console.log('✅ Found product:', data.name);
+      console.log('Product found:', data.name);
       return { valid: true, product: data };
     } catch (err) {
       console.error('Validation error:', err);
@@ -130,211 +59,184 @@ export default function QRScanner({ onError }) {
     }
   };
 
-  const scanFrame = () => {
-    if (!videoRef.current || !canvasRef.current || status !== 'scanning') return;
-
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
-
+  const scanImage = async (imageSrc) => {
     try {
-      if (video.readyState === video.HAVE_ENOUGH_DATA) {
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      setStatus('scanning');
+      setError(null);
+
+      // Load jsQR library
+      const jsQR = await loadQRLibrary();
+
+      const img = new Image();
+      img.onload = async () => {
+        const canvas = canvasRef.current;
+        const ctx = canvas.getContext('2d');
+
+        canvas.width = img.width;
+        canvas.height = img.height;
+        ctx.drawImage(img, 0, 0);
 
         const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imageData.data, imageData.width, imageData.height);
 
-        // Try ZXing first
-        if (window.ZXing) {
-          try {
-            const codeReader = new window.ZXing.BrowserMultiFormatReader();
-            const result = codeReader.decodeFromImageData(imageData, canvas.width, canvas.height);
-            
-            if (result && result.text) {
-              handleQRDetection(result.text);
-              return;
-            }
-          } catch (e) {
-            // No code detected, continue
+        if (code && code.data) {
+          console.log('QR Code detected:', code.data);
+          
+          const result = await validateQRCode(code.data);
+          
+          if (result.valid) {
+            setStatus('success');
+            setTimeout(() => {
+              const transactionUrl = createPageUrl('Transaction') + `?productId=${result.product.id}`;
+              window.location.href = transactionUrl;
+            }, 1500);
+          } else {
+            setError(result.error);
+            setStatus('idle');
           }
+        } else {
+          setError('No QR code found in image. Try a clearer photo.');
+          setStatus('idle');
         }
+      };
 
-        // Fallback to jsQR
-        if (window.jsQR) {
-          const code = window.jsQR(imageData.data, imageData.width, imageData.height);
-          if (code && code.data) {
-            handleQRDetection(code.data);
-            return;
-          }
-        }
-      }
+      img.onerror = () => {
+        setError('Failed to load image');
+        setStatus('idle');
+      };
+
+      img.src = imageSrc;
     } catch (err) {
       console.error('Scan error:', err);
+      setError(err.message);
+      setStatus('idle');
     }
-
-    animationFrameRef.current = requestAnimationFrame(scanFrame);
   };
 
-  const handleQRDetection = (qrData) => {
-    const now = Date.now();
-    
-    if (now - lastDetectionRef.current > 500 && !detectedCodesRef.current.has(qrData)) {
-      console.log('🎯 QR Code scanned:', qrData);
-      detectedCodesRef.current.add(qrData);
-      lastDetectionRef.current = now;
-      
-      validateQRCode(qrData).then(result => {
-        if (result.valid) {
-          console.log('✅ Valid QR - Redirecting');
-          stopCamera();
-          setStatus('detected');
-          
-          setTimeout(() => {
-            const transactionUrl = createPageUrl('Transaction') + `?productId=${result.product.id}`;
-            window.location.href = transactionUrl;
-          }, 1000);
-        } else {
-          console.log('❌ Invalid QR - Showing error');
-          setError('Product not found: ' + result.error);
-          setStatus('invalid');
-          
-          setTimeout(() => {
-            setError(null);
-            setStatus('scanning');
-            detectedCodesRef.current.delete(qrData);
-          }, 2000);
-        }
-      });
+  const handleFileSelect = (event) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const imageSrc = e.target?.result;
+      setPreview(imageSrc);
+      scanImage(imageSrc);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCancel = () => {
+    setPreview(null);
+    setError(null);
+    setStatus('idle');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
     }
   };
 
   return (
-    <div className="fixed inset-0 bg-black overflow-hidden">
-      <video
-        ref={videoRef}
-        className="absolute inset-0 w-full h-full object-cover"
-        muted
-        playsInline
-      />
-      <canvas ref={canvasRef} className="hidden" />
-
-      {/* Scanning Grid Overlay */}
-      {status === 'scanning' && (
-        <div className="absolute inset-0 flex items-center justify-center">
-          <div className="relative w-80 h-80">
-            <div className="absolute inset-0 border-2 border-white rounded-lg"></div>
-            <div className="absolute top-0 left-0 w-8 h-8 border-t-4 border-l-4 border-blue-400"></div>
-            <div className="absolute top-0 right-0 w-8 h-8 border-t-4 border-r-4 border-blue-400"></div>
-            <div className="absolute bottom-0 left-0 w-8 h-8 border-b-4 border-l-4 border-blue-400"></div>
-            <div className="absolute bottom-0 right-0 w-8 h-8 border-b-4 border-r-4 border-blue-400"></div>
-
-            <div
-              className="absolute left-0 right-0 h-1 bg-gradient-to-b from-green-400 to-transparent"
-              style={{
-                animation: 'scanLine 2s linear infinite',
-                top: '0%'
-              }}
-            ></div>
-
-            <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2">
-              <div className="w-6 h-6 border-2 border-white rounded-full opacity-50"></div>
-            </div>
-          </div>
-
-          <style>{`
-            @keyframes scanLine {
-              0% { top: 0%; }
-              50% { top: 100%; }
-              100% { top: 100%; }
-            }
-          `}</style>
-        </div>
-      )}
-
-      {/* Loading State */}
-      {status === 'loading' && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-          <div className="text-center space-y-4">
-            <div className="w-16 h-16 border-4 border-white border-t-blue-500 rounded-full animate-spin mx-auto"></div>
-            <p className="text-white text-xl font-semibold">Initializing Scanner</p>
-            <p className="text-white/60">Loading QR detection library...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Invalid QR Code State */}
-      {status === 'invalid' && (
-        <div className="absolute inset-0 bg-red-600/90 flex items-center justify-center">
-          <div className="text-center space-y-4">
-            <AlertCircle className="w-24 h-24 text-white mx-auto" />
-            <p className="text-white text-2xl font-bold">Product Not Found</p>
-            <p className="text-white/80">{error}</p>
-            <p className="text-white text-sm mt-4">Scanning will resume...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Detected State */}
-      {status === 'detected' && (
-        <div className="absolute inset-0 bg-green-600/90 flex items-center justify-center">
-          <div className="text-center space-y-4">
-            <svg
-              className="w-24 h-24 text-white mx-auto animate-bounce"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-                clipRule="evenodd"
-              />
-            </svg>
-            <p className="text-white text-2xl font-bold">QR Code Detected!</p>
-            <p className="text-white/80">Redirecting...</p>
-          </div>
-        </div>
-      )}
-
-      {/* Error State */}
-      {status === 'error' && (
-        <div className="absolute inset-0 bg-red-600/90 flex items-center justify-center p-4">
-          <div className="bg-white rounded-lg p-6 max-w-sm w-full space-y-4">
-            <div className="flex items-center gap-3">
-              <AlertCircle className="w-8 h-8 text-red-600" />
-              <h3 className="text-xl font-bold text-red-600">Scanner Error</h3>
-            </div>
-            <p className="text-gray-700">{error}</p>
-            <button
-              onClick={() => window.location.reload()}
-              className="w-full bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition"
-            >
-              Retry
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* Bottom Info */}
-      {status === 'scanning' && (
-        <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-6 text-center">
-          <p className="text-white text-lg font-semibold">Position QR Code in Frame</p>
-          <p className="text-white/60 text-sm mt-1">Keep steady for automatic scanning</p>
-        </div>
-      )}
-
-      {/* Top Bar */}
-      {status === 'scanning' && (
-        <div className="absolute top-0 left-0 right-0 bg-gradient-to-b from-black/80 to-transparent p-4 flex items-center justify-between z-10">
-          <h2 className="text-white text-xl font-bold">QR Scanner</h2>
-          <button 
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+      <div className="max-w-md mx-auto pt-8 space-y-6">
+        {/* Header */}
+        <div className="flex items-center justify-between">
+          <h1 className="text-3xl font-bold text-gray-900">QR Scanner</h1>
+          <button
             onClick={() => window.location.href = createPageUrl('Dashboard')}
-            className="p-2 hover:bg-white/20 rounded-full transition"
+            className="p-2 hover:bg-gray-200 rounded-full transition"
           >
-            <X className="w-6 h-6 text-white" />
+            <X className="w-6 h-6 text-gray-600" />
           </button>
         </div>
-      )}
+
+        {/* Upload Area */}
+        {!preview && (
+          <div
+            onClick={() => fileInputRef.current?.click()}
+            className="border-2 border-dashed border-blue-400 rounded-lg p-8 text-center cursor-pointer hover:border-blue-600 hover:bg-blue-50 transition"
+          >
+            <Upload className="w-16 h-16 text-blue-500 mx-auto mb-4" />
+            <p className="text-xl font-semibold text-gray-900">Upload QR Code</p>
+            <p className="text-gray-600 mt-2">Click to select a photo or take a picture</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              onChange={handleFileSelect}
+              className="hidden"
+              capture="environment"
+            />
+          </div>
+        )}
+
+        {/* Preview */}
+        {preview && (
+          <div className="space-y-4">
+            <div className="relative rounded-lg overflow-hidden border-2 border-gray-300">
+              <img src={preview} alt="Preview" className="w-full" />
+            </div>
+
+            {/* Scanning State */}
+            {status === 'scanning' && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-center">
+                <div className="w-8 h-8 border-4 border-blue-500 border-t-blue-200 rounded-full animate-spin mx-auto mb-3"></div>
+                <p className="text-blue-900 font-semibold">Scanning...</p>
+              </div>
+            )}
+
+            {/* Error State */}
+            {error && (
+              <div className="bg-red-50 border border-red-200 rounded-lg p-4 space-y-3">
+                <div className="flex items-start gap-3">
+                  <AlertCircle className="w-6 h-6 text-red-600 flex-shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-red-900 font-semibold">Error</p>
+                    <p className="text-red-700 text-sm mt-1">{error}</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleCancel}
+                  className="w-full bg-red-600 hover:bg-red-700 text-white font-semibold py-2 rounded-lg transition"
+                >
+                  Try Another Photo
+                </button>
+              </div>
+            )}
+
+            {/* Success State */}
+            {status === 'success' && (
+              <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-center space-y-3">
+                <CheckCircle className="w-12 h-12 text-green-600 mx-auto animate-bounce" />
+                <p className="text-green-900 font-semibold text-lg">QR Code Found!</p>
+                <p className="text-green-700 text-sm">Redirecting...</p>
+              </div>
+            )}
+
+            {/* Cancel Button */}
+            {status !== 'success' && (
+              <button
+                onClick={handleCancel}
+                className="w-full bg-gray-300 hover:bg-gray-400 text-gray-900 font-semibold py-3 rounded-lg transition"
+              >
+                Cancel
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* Canvas for processing */}
+        <canvas ref={canvasRef} className="hidden" />
+
+        {/* Info */}
+        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 text-sm text-gray-700">
+          <p className="font-semibold text-gray-900 mb-2">Tips:</p>
+          <ul className="list-disc list-inside space-y-1 text-gray-700">
+            <li>Take a clear photo of the QR code</li>
+            <li>Make sure lighting is good</li>
+            <li>QR code should fill most of the frame</li>
+          </ul>
+        </div>
+      </div>
     </div>
   );
 }
