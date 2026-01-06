@@ -59,6 +59,35 @@ export default function QRScanner() {
     }
   };
 
+  const enhanceImage = (ctx, width, height) => {
+    // Get current image data
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+
+    // Increase contrast and brightness for better QR detection
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+
+      // Convert to grayscale
+      const gray = (r + g + b) / 3;
+
+      // Increase contrast (make blacks darker, whites lighter)
+      const contrast = 1.5;
+      const brightened = ((gray - 128) * contrast) + 128;
+
+      // Apply to all channels
+      const final = Math.max(0, Math.min(255, brightened));
+      data[i] = final;
+      data[i + 1] = final;
+      data[i + 2] = final;
+    }
+
+    ctx.putImageData(imageData, 0, 0);
+    return ctx.getImageData(0, 0, width, height);
+  };
+
   const scanImage = async (imageSrc) => {
     try {
       setStatus('scanning');
@@ -72,15 +101,33 @@ export default function QRScanner() {
         const canvas = canvasRef.current;
         const ctx = canvas.getContext('2d');
 
-        canvas.width = img.width;
-        canvas.height = img.height;
-        ctx.drawImage(img, 0, 0);
+        // Scale down large images for better processing
+        let width = img.width;
+        let height = img.height;
+        
+        if (width > 2000 || height > 2000) {
+          const scale = Math.min(2000 / width, 2000 / height);
+          width = width * scale;
+          height = height * scale;
+        }
 
-        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        const code = jsQR(imageData.data, imageData.width, imageData.height);
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+
+        // Try original image first
+        let imageData = ctx.getImageData(0, 0, width, height);
+        let code = jsQR(imageData.data, width, height);
+
+        // If not found, try enhanced image
+        if (!code) {
+          console.log('First scan failed, trying enhanced image...');
+          imageData = enhanceImage(ctx, width, height);
+          code = jsQR(imageData.data, width, height);
+        }
 
         if (code && code.data) {
-          console.log('QR Code detected:', code.data);
+          console.log('✅ QR Code detected:', code.data);
           
           const result = await validateQRCode(code.data);
           
@@ -95,7 +142,7 @@ export default function QRScanner() {
             setStatus('idle');
           }
         } else {
-          setError('No QR code found in image. Try a clearer photo.');
+          setError('No QR code detected. Make sure the QR code is visible and in focus.');
           setStatus('idle');
         }
       };
