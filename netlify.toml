@@ -8,17 +8,16 @@
   status = 200
 
 [[headers]]
-  for = "/assets/*"
+  for = "/*.js"
   [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
-    Content-Type = "application/javascript"
+    Content-Type = "application/javascript; charset=utf-8"
 
 [[headers]]
-  for = "*.js"
+  for = "/*.css"
   [headers.values]
-    Content-Type = "application/javascript"
+    Content-Type = "text/css; charset=utf-8"
 
 [[headers]]
-  for = "*.css"
+  for = "/assets/*.js"
   [headers.values]
-    Content-Type = "text/css"
+    Content-Type = "application/javascript; charset=utf-8"
